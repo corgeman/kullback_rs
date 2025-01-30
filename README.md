@@ -7,10 +7,10 @@ WebAssembly to work in the browser.
 
 ## Usage
 
-You can play around with the compiled version [here](https://corgi.rip/kullback.html). 
+You can play around with the compiled version [here](https://corgi.rip/kullback). 
 
-If you would like to compile it yourself, install [wasm-pack](https://github.com/rustwasm/wasm-pack)
-then run `wasm-pack build`. The `pkg/` directory should now have all the necessary files, which
+If you want to yourself, install [wasm-pack](https://github.com/rustwasm/wasm-pack)
+then run `wasm-pack build --target web`. The `pkg/` directory should now have all the necessary files, which
 `test.html` can load and use.
 
 ## License
