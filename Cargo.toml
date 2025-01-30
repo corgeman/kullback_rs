@@ -27,10 +27,6 @@ plotters-canvas = "0.3.0"
 [dev-dependencies]
 wasm-bindgen-test = "0.3.34"
 
-[package.metadata.wasm-pack.profile.release]
-# previously had just ['-O4']
-wasm-opt = ['-O4', '-g']
-
 [profile.release]
 # Tell `rustc` to optimize for small code size.
 opt-level = "s"
