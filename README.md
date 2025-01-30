@@ -3,6 +3,8 @@
 An implementation of the [Kullback Test](https://corgi.rip/blog/kullback-in-ctf/) in Rust, compiled to
 WebAssembly to work in the browser.
 
+![The compiled program running](./test.png)
+
 ## Usage
 
 You can play around with the compiled version [here](https://corgi.rip/kullback.html). 
