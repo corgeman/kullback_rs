@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en-US">
+  <head>
+    <meta charset="utf-8" />
+    <title>kullback_rs</title>
+  </head>
+  <body>
+    <div class="main">
+        <canvas id="canvas" width="680" height="480"></canvas>
+        <br>
+        <textarea id="data" placeholder="Enter data to analyze..." style="width: 680px" rows="5"></textarea>
+        <br>
+        <input id="range" type="range" min="2" disabled="disabled">
+
+        <input type="radio" id="UTF8" name="encoding" value="UTF8" checked disabled/>
+        <label for="UTF8">UTF8</label>
+        <input type="radio" id="HEX" name="encoding" value="HEX" disabled/>
+        <label for="HEX">HEX</label>
+        <input type="radio" id="BASE64" name="encoding" value="BASE64" disabled/>
+        <label for="BASE64">BASE64</label>
+
+        <a id="errors" style="color: red; padding-left: 0.5em"></a>
+    </div>
+
+    <script type="module">
+      import init, { analyze } from "./kullback_wasm.js";
+      init().then(() => {
+        const canvas = document.getElementById("canvas");
+        const divmap = {'UTF8':2,'HEX':4,'BASE64':8}
+
+        let radios = document.getElementsByName('encoding');
+        let range = document.getElementById("range");
+        let input = document.getElementById("data");
+        let errorbox =  document.getElementById("errors");
+        let cache = [];
+
+        input.addEventListener('input', () => {
+            let encoding = document.querySelector('input[name="encoding"]:checked').value;
+            cache = [];
+            range.disabled = input.value == '';
+            range.max = Math.floor(input.value.length/divmap[encoding])-1;
+            range.value = Math.floor(range.max/2);
+            for (var i = 0, r=radios, l=r.length; i < l;  i++){
+                r[i].disabled = input.value == '';
+            }
+        });
+
+        // Redraw the graph if anything changes.
+        function watcher(){
+            const canvas = document.getElementById("canvas");
+            let encoding = document.querySelector('input[name="encoding"]:checked').value;
+            let input = document.getElementById("data").value;
+            let range = document.getElementById("range").value;
+            cache = analyze(canvas,input,range,encoding,cache);
+            errorbox.textContent = '';
+        }
+
+        for (var i = 0, r=radios, l=r.length; i < l;  i++){
+            // If the encoding is changed, change the maximum range.
+            r[i].addEventListener("change", () => {
+                cache = [];
+                let encoding = document.querySelector('input[name="encoding"]:checked').value;
+                range.max = Math.floor(input.value.length/divmap[encoding])-1;
+                });
+            r[i].addEventListener("change",watcher);
+        }
+
+        range.addEventListener("input",watcher);
+        input.addEventListener("input",watcher);
+
+        // hacky: i want to display rust panics (sent via console.error) to the screen
+        // but eventlisteners or window.onerror doesn't catch console.error
+        // so....
+        let errorhook = console.error;
+        console.error = (e) => {
+            if (e.startsWith("panicked at")){
+                errorbox.textContent = `ERROR: ${e.split("\n")[1]}`;
+            }
+            errorhook(e);
+        }
+      });
+
+
+    </script>
+  </body>
+  <style>
+    .main {
+        max-width: fit-content;
+        margin-left: auto;
+        margin-right: auto;
+    }
+  </style>
+</html>
