@@ -8,14 +8,10 @@ use plotters_canvas::CanvasBackend;
 use web_sys::HtmlCanvasElement;
 use base64::{Engine as _, prelude::BASE64_STANDARD as b64};
 use base16ct::mixed::decode_vec as hexdec;
-use std::collections::HashMap;
-
-use std::hash::BuildHasherDefault;
 use nohash_hasher::IntMap;
 
 /*
 TODO:
-
 - If there is a consecutive chain of spikes (ex. periods 17,18,19 all 'spike'), then
   only place a triangle on the largest spike in that chain.
 
@@ -24,6 +20,10 @@ TODO:
 
 - If the period is very low (2, 3, 4), spikes are so frequent that they don't deviate from the mean
   and therefore our standard deviation test can't find them.
+
+- The way error handling currently works can leave some vague error messages. For instance, 
+  providing invalid base64 displays the error "Invalid input length" which is pretty unclear. 
+  Something like "Base64: Invalid input length" would be much better.
 */
 
 
