@@ -254,6 +254,6 @@ especially if the input is massive. Instead, just write it to a given output buf
 fn transpose4(data: &Vec<char>, output: &mut Vec<char>, n: usize) {
     let chunk_size = data.len().div_ceil(n);
     for (i, d) in data.iter().enumerate() {
-        output[((i*chunk_size)%(chunk_size*n))+(i/n)] = *d;
+        output[((i%n)*(chunk_size))+(i/n)] = *d;
     }
 }
