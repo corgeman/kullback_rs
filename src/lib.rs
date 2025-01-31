@@ -23,17 +23,29 @@ TODO:
   Something like "Base64: Invalid input length" would be much better.
 */
 
+
+
+/// Analyze some text using the Kullback test and graph the results to a canvas.
+/// 
+/// `canvas` - an HTML Canvas element that will have the results graphed to it.
+/// 
+/// `input` - the input data to analyze.
+/// 
+/// `range` - the maximum period to check
+/// 
+/// `fmt` - the encoding of the data. Should be 'UTF8', 'BASE64', or 'HEX'.
+/// 
+/// `cache` - a list of previously-computed IoC calculations so they don't need to be recalculated
 #[wasm_bindgen]
 pub fn analyze(canvas: HtmlCanvasElement, input: &str, range: usize, fmt: &str, mut cache: Vec<f32>) -> Result<Vec<f32>,  JsValue> {
     utils::set_panic_hook();
 
     // If cache holds enough data to graph, use it!
     if range <= cache.len() {
-        let cached = cache.clone().into_iter().take(range-1).collect();
-        plot(canvas,cached);
+        let cached: Vec<f32> = cache.clone().into_iter().take(range-1).collect();
+        plot(canvas,&cached)?;
         return Ok(cache) 
     } // Otherwise we'll need to extend it down below.
-   
 
     /*
     Decode the input from UTF8, hex, or base64.
@@ -73,9 +85,9 @@ pub fn analyze(canvas: HtmlCanvasElement, input: &str, range: usize, fmt: &str, 
     for i in (cache.len()+1)..range{
         let chunk_size = data.len().div_ceil(i);
         let t_len = chunk_size*i; // how much of the transpositions array we use
-        transpose(&data,&mut transpositions,i); // Create transpositions
-        // number of chunks with padding
-        let cap = if (data.len() % i) != 0 {data.len() % i} else {i}; 
+        transpose(&data,&mut transpositions,i);
+
+        let cap = if (data.len() % i) != 0 {data.len() % i} else {i}; // # of chunks with padding
 
         let mut sum: f32 = 0.0;
         for (j, x) in transpositions[..t_len].chunks_exact(chunk_size).enumerate() {
@@ -86,11 +98,17 @@ pub fn analyze(canvas: HtmlCanvasElement, input: &str, range: usize, fmt: &str, 
     }
 
     // Plot it!
-    return plot(canvas,cache); // rust doesn't like this but I don't get why
+    plot(canvas,&cache)?;
+
+    return Ok(cache);
 }
 
 /// Plot a list of IoC results given an HTML canvas.
-fn plot(canvas: HtmlCanvasElement, iocs: Vec<f32>) -> Result<Vec<f32>, JsValue>{
+/// 
+/// `canvas` - an HTML Canvas element that will have the results graphed to it.
+/// 
+/// `iocs` - the list of IoC results that should be plotted.
+fn plot(canvas: HtmlCanvasElement, iocs: &[f32]) -> Result<(), JsValue>{
     let range: usize = iocs.len()+1;
 
     // Calculate max/min/mean/standard deviation.
@@ -134,7 +152,7 @@ fn plot(canvas: HtmlCanvasElement, iocs: Vec<f32>) -> Result<Vec<f32>, JsValue>{
 
     // Draw blue line on graph
     chart_context.draw_series(LineSeries::new(
-        (1..range).zip(iocs.clone().into_iter()),
+        (1..range).zip(iocs.to_owned().clone().into_iter()),
         &BLUE,
     )).map_err(|e| e.to_string())?;
 
@@ -146,10 +164,12 @@ fn plot(canvas: HtmlCanvasElement, iocs: Vec<f32>) -> Result<Vec<f32>, JsValue>{
             .map_err(|e| e.to_string())?;
     }
 
-    return Ok(iocs);
+    return Ok(());
 }
 
-/// IOC calculator.
+/// Index of Coincidence calculator.
+/// 
+/// `data` - the data to perform the calculation on.
 fn ioc(data: &[char]) -> f32 {
     /* HashMap that uses the character itself as the 'hash'.
        There is some concern about this here: https://www.reddit.com/r/rust/comments/ps6fzn/hasher_for_char_keys/
@@ -158,19 +178,24 @@ fn ioc(data: &[char]) -> f32 {
     let mut counts: IntMap<u32,usize> = IntMap::default();
     let l = data.len() as f32;
 
+    // Count frequencies of each character.
     for x in data {
         counts.entry(*x as u32).and_modify(|x| *x += 1).or_insert(1);
     }
-    counts.into_values().map(|x| x*(x-1)).sum::<usize>() as f32 / (l*(l-1.0))
+
+    // Perform the actual IoC calculation. https://en.wikipedia.org/wiki/Index_of_coincidence
+    return counts.into_values().map(|x| x*(x-1)).sum::<usize>() as f32 / (l*(l-1.0))
 }
 
 
-/*
-Hopefully final iteration of the transposition problem. 
-Creating and returning a Vec on EVERY transposition is pretty expensive,
-especially if the input is massive. Instead, just write it to a given output buffer.
-*/
-fn transpose(data: &[char], output: &mut[char], n: usize) {
+/// Transpose data into `n` rows. 
+/// 
+/// `data` - the data to be transposed.
+/// 
+/// `output` - the output buffer for transposition. Needs to be `n` bytes larger than `data`'s length to account for incomplete rows.
+/// 
+/// `n` - the number of rows the data should be transposed into.
+fn transpose<T: Copy>(data: &[T], output: &mut[T], n: usize) {
     let chunk_size = data.len().div_ceil(n);
     for (i, d) in data.iter().enumerate() {
         output[((i%n)*(chunk_size))+(i/n)] = *d;
