@@ -15,9 +15,6 @@ TODO:
 - If there is a consecutive chain of spikes (ex. periods 17,18,19 all 'spike'), then
   only place a triangle on the largest spike in that chain.
 
-- Profiling shows that wasm.memset() and wasm.memcpy() both take a significant amount
-  of execution time. Find ways to reduce, if possible.
-
 - If the period is very low (2, 3, 4), spikes are so frequent that they don't deviate from the mean
   and therefore our standard deviation test can't find them.
 
@@ -25,9 +22,6 @@ TODO:
   providing invalid base64 displays the error "Invalid input length" which is pretty unclear. 
   Something like "Base64: Invalid input length" would be much better.
 */
-
-
-
 
 #[wasm_bindgen]
 pub fn analyze(canvas: HtmlCanvasElement, input: &str, range: usize, fmt: &str, mut cache: Vec<f32>) -> Result<Vec<f32>,  JsValue> {
