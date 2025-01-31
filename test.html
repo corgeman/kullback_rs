@@ -39,7 +39,7 @@
             cache = [];
             range.disabled = input.value == '';
             range.max = Math.floor(input.value.length/divmap[encoding])-1;
-            range.value = Math.floor(range.max/2);
+            range.value = Math.min(500,Math.floor(range.max/2));
             for (var i = 0, r=radios, l=r.length; i < l;  i++){
                 r[i].disabled = input.value == '';
             }
