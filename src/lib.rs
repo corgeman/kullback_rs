@@ -16,7 +16,7 @@ TODO:
   only place a triangle on the largest spike in that chain.
 
 - If the period is very low (2, 3, 4), spikes are so frequent that they don't deviate from the mean
-  and therefore our standard deviation test can't find them.
+  and therefore our standard deviation test can't find them. Find some solution to fix this.
 
 - The way error handling currently works can leave some vague error messages. For instance, 
   providing invalid base64 displays the error "Invalid input length" which is pretty unclear. 
@@ -71,26 +71,28 @@ pub fn analyze(canvas: HtmlCanvasElement, input: &str, range: usize, fmt: &str, 
     // Extend cache to hold everything we need
     cache.reserve(range-cache.len());
 
-    // We should also create a Vec that stores each transposition output.
+    // We also need to create a Vec that stores each transposition output.
     let mut transpositions = vec!['\u{0}'; data.len()+range];
-
-    // keeping for testing: ioc calculation with transpose()
-    // for i in (cache.len()+1)..range {
-    //     let transpositions = transpose(&data,i);
-    //     cache.push(transpositions.iter()
-    //     .map(|x| if is_bytes {fast_ioc(x)} else {slow_ioc(x)})
-    //     .sum::<f32>() / transpositions.len() as f32);
-    // }
 
     for i in (cache.len()+1)..range{
         let chunk_size = data.len().div_ceil(i);
         let t_len = chunk_size*i; // how much of the transpositions array we use
         transpose(&data,&mut transpositions,i);
 
-        let cap = if (data.len() % i) != 0 {data.len() % i} else {i}; // # of chunks with padding
+        let cap = if (data.len() % i) != 0 {data.len() % i} else {i}; // # of complete chunks
 
         let mut sum: f32 = 0.0;
         for (j, x) in transpositions[..t_len].chunks_exact(chunk_size).enumerate() {
+            // Every chunk past the 'cap'th needs to have its last character stripped off
+            // as it is an 'incomplete' row. For instance, transposing 'xyzxyzxyzx' with n=3 gets:
+            /*
+            xxxx
+            yyy\0
+            zzz\0
+
+            where \0 means 'null byte'.
+            */
+            // Here, the last two rows are incomplete and so their last character is "uninitialized".
             let fixed = &x[..chunk_size-((j >= cap) as usize)];
             sum += ioc(fixed);
         }
