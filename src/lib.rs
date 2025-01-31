@@ -12,21 +12,28 @@ use std::collections::HashMap;
 TODO:
 
 - If there is a consecutive chain of spikes (ex. periods 17,18,19 all 'spike'), then
-  only place a diamond/text on the largest spike in that chain.
+  only place a triangle on the largest spike in that chain.
 
-- Profiling shows that plotting is negligible,
-  wasm.memset() and wasm.memcpy() both take ~25% of execution time. Find ways to reduce that?
+- Profiling shows that wasm.memset() and wasm.memcpy() both take a significant amount
+  of execution time. Find ways to reduce, if possible.
+    - fast_ioc requires 1024 bytes (256*4) of zero'd out space every time it's called.
+      Might be worth to write the counts in to a mutable 'scratch_space' argument, then during the
+      filter_map zero out non-zero indices in that argument.
+
+- If the period is very low (2, 3, 4), spikes are so frequent that they don't deviate from the mean
+  and therefore our standard deviation test can't find them.
 */
 
+
 #[wasm_bindgen]
-pub fn analyze(canvas: HtmlCanvasElement, name: &str, range: usize, fmt: &str, mut cache: Vec<f32>) -> Vec<f32> {
+pub fn analyze(canvas: HtmlCanvasElement, input: &str, range: usize, fmt: &str, mut cache: Vec<f32>) -> Result<Vec<f32>,  JsValue> {
     utils::set_panic_hook();
 
     // If cache holds enough data to graph, use it!
     if range <= cache.len() {
         let cached = cache.clone().into_iter().take(range-1).collect();
         plot(canvas,cached);
-        return cache 
+        return Ok(cache) 
     } // Otherwise we'll need to extend it down below.
    
 
@@ -38,23 +45,26 @@ pub fn analyze(canvas: HtmlCanvasElement, name: &str, range: usize, fmt: &str, m
     Also, check if the data can be treated as bytes. We can use that to speed up the IoC calculation.
     */
     let (is_bytes, data) : (bool, Vec<char>) = match fmt {
-        "UTF8" => (name.is_ascii() , name.chars().collect()),
-        "HEX" => (true, hexdec(name).expect("Failed to decode hex")
+        "UTF8" => (input.is_ascii() , input.chars().collect()),
+        "HEX" => (true, hexdec(input).map_err(|e| e.to_string())?
                     .iter().map(|d| *d as char).collect()),
-        "BASE64" => (true, b64.decode(name).expect("Failed to decode base64")
+        "BASE64" => (true, b64.decode(input).map_err(|e| e.to_string())?
                         .iter().map(|d| *d as char).collect()),
-        _ => panic!("Invalid format (!?)")
+        _ => return Err("Invalid encoding format (???)".into())
     };
 
     // Don't analyze extremely short data.
-    assert!(data.len() >= 4, "Length of input is too short (4 chars minimum)");
+    if data.len() < 4 {return Err("Length of input is too short (4 chars minimum)".into())}
 
     // Range cannot be greater than len(data)/2, because analyzing less than two full blocks is useless.
     // This will be limited client-side but I can't be 100% sure that works.
-    assert!(range <= data.len()/2, "Range is too large, please decrease.");
+    if range > data.len()/2 {return Err("Range is too large. Please decrease.".into())}
 
     // Extend cache to hold everything we need
     cache.reserve(range-cache.len());
+
+    // We should also create a Vec that stores each transposition output.
+    let mut transpositions = vec!['\u{0}'; data.len()+range];
 
     // keeping for testing: ioc calculation with transpose()
     // for i in (cache.len()+1)..range {
@@ -66,15 +76,17 @@ pub fn analyze(canvas: HtmlCanvasElement, name: &str, range: usize, fmt: &str, m
 
     for i in (cache.len()+1)..range{
         let chunk_size = data.len().div_ceil(i);
-        let transpositions = transpose3(&data,i);
-        let cap = data.len() % i;
+        let t_len = chunk_size*i; // how much of the transpositions array we use
+        transpose4(&data,&mut transpositions,i); // Create transpositions
+        // number of chunks with padding
+        let cap = if (data.len() % i) != 0 {data.len() % i} else {i}; 
 
         let mut sum: f32 = 0.0;
-        for (j, x) in transpositions.chunks_exact(chunk_size).enumerate() {
+        for (j, x) in transpositions[..t_len].chunks_exact(chunk_size).enumerate() {
             let fixed = &x[..chunk_size-((j >= cap) as usize)];
             sum += if is_bytes {fast_ioc(fixed)} else {slow_ioc(fixed)}
         }
-        cache.push(sum / ((transpositions.len()/chunk_size) as f32));
+        cache.push(sum / i as f32);
     }
 
     // Plot it!
@@ -82,7 +94,7 @@ pub fn analyze(canvas: HtmlCanvasElement, name: &str, range: usize, fmt: &str, m
 }
 
 /// Plot a list of IoC results given an HTML canvas.
-fn plot(canvas: HtmlCanvasElement, iocs: Vec<f32>) -> Vec<f32>{
+fn plot(canvas: HtmlCanvasElement, iocs: Vec<f32>) -> Result<Vec<f32>, JsValue>{
     let range: usize = iocs.len()+1;
 
     // Calculate max/min/mean/standard deviation.
@@ -96,24 +108,25 @@ fn plot(canvas: HtmlCanvasElement, iocs: Vec<f32>) -> Vec<f32>{
 
     // Begin plotting!
     let root = CanvasBackend::with_canvas_object(canvas)
-    .expect("Failed to use canvas object")
-    .into_drawing_area();
+    .ok_or("Failed to create canvas")?.into_drawing_area();
     root.fill(&WHITE).unwrap();
 
     let mut chart_builder = ChartBuilder::on(&root);
     chart_builder.margin(5).margin_top(15).set_left_and_bottom_label_area_size(35);
     let mut chart_context = chart_builder
         .build_cartesian_2d(0..range, (min*0.95)..(max*1.05))
-        .expect("Failed to build chart context");
+        .map_err(|e| e.to_string())?;
     chart_context.configure_mesh()
-    .disable_mesh().draw().expect("Failed to setup chart axes"); // sounds redundant but required for axes
+    .disable_mesh().draw().map_err(|e| e.to_string())?; // sounds redundant but required for axes
 
+    // Create a red/black triangle at (x,y)
     let triangle = |x: usize, y: f32|{
         return EmptyElement::at((x, y))
             + TriangleMarker::new((0, 0), 7, ShapeStyle::from(&BLACK))
             + TriangleMarker::new((0, 0), 5, ShapeStyle::from(&RED))
     };
 
+    // Write x at (x,y)
     let label = |x: usize, y: f32| {
         return EmptyElement::at((x, y))
             + Text::new(
@@ -123,17 +136,21 @@ fn plot(canvas: HtmlCanvasElement, iocs: Vec<f32>) -> Vec<f32>{
             )
     };
 
+    // Draw blue line on graph
     chart_context.draw_series(LineSeries::new(
         (1..range).zip(iocs.clone().into_iter()),
         &BLUE,
-    )).expect("Failed to plot line series");
+    )).map_err(|e| e.to_string())?;
 
+    // Draw triangle & label for each spike
     for i in spikes {
-        chart_context.plotting_area().draw(&label(i+1, iocs[i])).expect("Failed to plot spike text");
-        chart_context.plotting_area().draw(&triangle(i+1, iocs[i])).expect("Failed to plot triangle");
+        chart_context.plotting_area().draw(&label(i+1, iocs[i]))
+            .map_err(|e| e.to_string())?;
+        chart_context.plotting_area().draw(&triangle(i+1, iocs[i]))
+            .map_err(|e| e.to_string())?;
     }
 
-    return iocs;
+    return Ok(iocs);
 }
 
 /// IOC calculator without hashmap usage, used if input is all 0-255.
@@ -151,7 +168,7 @@ fn fast_ioc(data: &[char]) -> f32 {
     A filter_map() could easily fix this, but I can't read WebAssembly so I don't know 
     if it would impact speed.
     */
-    counts.into_iter().map(|x| x*(x-1)).sum::<usize>() as f32 / (l*(l-1.0))
+    counts.into_iter().filter_map(|x| (x!=0).then(|| x*(x-1))).sum::<usize>() as f32 / (l*(l-1.0))
 }
 
 /// IOC calculator for text containing UTF8 characters.
@@ -218,6 +235,7 @@ and that number is how many chunks will be padding-less.
 Therefore, we just pad with \0, and analyze() strips it off without even having
 to look for it.
 */
+#[allow(dead_code)]
 fn transpose3(data: &Vec<char>, n: usize) -> Vec<char> {
     let chunk_size = data.len().div_ceil(n);
     let mut arr: Vec<char> = vec!['\u{0}'; chunk_size*n];
@@ -225,4 +243,17 @@ fn transpose3(data: &Vec<char>, n: usize) -> Vec<char> {
         arr[((i*chunk_size)%(chunk_size*n))+(i/n)] = *d;
     }
     arr
+}
+
+
+/*
+Hopefully final iteration of the transposition problem. 
+Creating and returning a Vec on EVERY transposition is pretty expensive,
+especially if the input is massive. Instead, just write it to a given output buffer.
+*/
+fn transpose4(data: &Vec<char>, output: &mut Vec<char>, n: usize) {
+    let chunk_size = data.len().div_ceil(n);
+    for (i, d) in data.iter().enumerate() {
+        output[((i*chunk_size)%(chunk_size*n))+(i/n)] = *d;
+    }
 }
