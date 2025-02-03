@@ -23,7 +23,7 @@
     </div>
 
     <script type="module">
-      import init, { analyze } from "./pkg/kullback_wasm.js";
+      import init, { analyze, transcribe } from "./pkg/kullback_wasm.js";
       init().then(() => {
         const canvas = document.getElementById("canvas");
         const divmap = {'UTF8':2,'HEX':4,'BASE64':8}
@@ -33,10 +33,12 @@
         let input = document.getElementById("data");
         let errorbox =  document.getElementById("errors");
         let cache = [];
+        let data = [];
 
         input.addEventListener('input', () => {
             let encoding = document.querySelector('input[name="encoding"]:checked').value;
             cache = [];
+            data = transcribe(input.value,encoding);
             range.disabled = input.value == '';
             range.max = Math.floor(input.value.length/divmap[encoding])-1;
             range.value = Math.min(500,Math.floor(range.max/2));
@@ -45,14 +47,18 @@
             }
         });
 
-        // Redraw the graph if anything changes.
+        //  Redraw the graph if anything changes.
         function watcher(){
             const canvas = document.getElementById("canvas");
             let encoding = document.querySelector('input[name="encoding"]:checked').value;
-            let input = document.getElementById("data").value;
             let range = Number(document.getElementById("range").value);
             try { // analyze returns a Result
-              cache = analyze(canvas,input,range,encoding,cache);
+              let t0 = performance.now();
+              let cl = cache.length;
+              console.log(data);
+              cache = analyze(canvas,data,range,cache);
+              let t1 = performance.now();
+              console.log(`took ${t1 - t0} milliseconds to analyze ${input.length} chars w/ ${range-cl} transpositions`)
               errorbox.textContent = '';
             } catch (e) { // Err variant
               errorbox.textContent = `ERROR: ${e}`;
@@ -65,12 +71,15 @@
                 cache = [];
                 let encoding = document.querySelector('input[name="encoding"]:checked').value;
                 range.max = Math.floor(input.value.length/divmap[encoding])-1;
+                range.value = Math.min(500,Math.floor(range.max/2));
                 });
             r[i].addEventListener("change",watcher);
         }
 
         range.addEventListener("input",watcher);
         input.addEventListener("input",watcher);
+
+
 
         // hacky: i want to display rust panics (sent via console.error) to the screen
         // but eventlisteners or window.onerror doesn't catch console.error
