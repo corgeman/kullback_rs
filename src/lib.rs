@@ -23,35 +23,20 @@ TODO:
   Something like "Base64: Invalid input length" would be much better.
 */
 
-
-
-/// Analyze some text using the Kullback test and graph the results to a canvas.
+/// Take input, decode it as UTF8/hex/base64-encoded data,
+/// then return an alphabetic transcription of the data.
 /// 
-/// `canvas` - an HTML Canvas element that will have the results graphed to it.
+/// `input` - The data to be transcribed.
+/// `fmt` - The format of the data. Must be "UTF8", "HEX", or "BASE64".
 /// 
-/// `input` - the input data to analyze.
 /// 
-/// `range` - the maximum period to check
+/// ```rust
 /// 
-/// `fmt` - the encoding of the data. Should be 'UTF8', 'BASE64', or 'HEX'.
-/// 
-/// `cache` - a list of previously-computed IoC calculations so they don't need to be recalculated
+/// let input = "abbacddabcabddacdb";
+/// assert_eq!(transcribe(&inp, &"UTF8").unwrap(),vec![0, 1, 1, 0, 2, 3, 3, 0, 1, 2, 0, 1, 3, 3, 0, 2, 3, 1]);
+/// ```
 #[wasm_bindgen]
-pub fn analyze(canvas: HtmlCanvasElement, input: &str, range: usize, fmt: &str, mut cache: Vec<f32>) -> Result<Vec<f32>,  JsValue> {
-    utils::set_panic_hook();
-
-    // If cache holds enough data to graph, use it!
-    if range <= cache.len() {
-        let cached: Vec<f32> = cache.clone().into_iter().take(range-1).collect();
-        plot(canvas,&cached)?;
-        return Ok(cache) 
-    } // Otherwise we'll need to extend it down below.
-
-    /*
-    Decode the input from UTF8, hex, or base64.
-    Kinda hacky since we're treating potentially binary data as characters,
-    but we're only looking for a unique mapping here and UTF8 can map all byte values 0-255.
-    */
+pub fn transcribe(input: &str, fmt: &str) -> Result<Vec<u32>, JsValue> {
     let data: Vec<char> = match fmt {
         "UTF8" => input.chars().collect(),
         "HEX" => hexdec(input).map_err(|e| e.to_string())?
@@ -61,6 +46,32 @@ pub fn analyze(canvas: HtmlCanvasElement, input: &str, range: usize, fmt: &str, 
         _ => return Err("Invalid encoding format (???)".into())
     };
 
+    let mut counts: IntMap<u32,u32> = IntMap::default();
+    return Ok(data.into_iter()
+    .map(|x| {
+        let l = counts.len() as u32;
+        *counts.entry(x as u32).or_insert(l) 
+        }).collect());
+}
+
+/// Analyze input with the Kullback test, then plot it.
+/// 
+/// `canvas` - An HtmlCanvasElement that the results will be graphed to.
+/// 
+/// `data` - The data to be analyzed. Must be transcribed with `transcribe()` first.
+/// 
+/// `range` - The maximum period to test.
+/// 
+/// `cache` - A list of previously-computed IOC results so this function doesn't need to recalculate them.
+#[wasm_bindgen]
+pub fn analyze(canvas: HtmlCanvasElement, data: Vec<u32>, range: usize, mut cache: Vec<f32>) -> Result<Vec<f32>,  JsValue> {
+    // If cache holds enough data to graph, use it!
+    if range <= cache.len() {
+        let cached: Vec<f32> = cache.clone().into_iter().take(range-1).collect();
+        plot(canvas,&cached)?;
+        return Ok(cache) 
+    } // Otherwise we'll need to extend it down below.
+
     // Don't analyze extremely short data.
     if data.len() < 4 {return Err("Length of input is too short (4 chars minimum)".into())}
 
@@ -68,11 +79,15 @@ pub fn analyze(canvas: HtmlCanvasElement, input: &str, range: usize, fmt: &str, 
     // This will be limited client-side but I can't be 100% sure that works.
     if range > data.len()/2 {return Err("Range is too large. Please decrease.".into())}
 
+    utils::set_panic_hook();
+
+    let n: usize = *data.iter().max().unwrap() as usize + 1;
+
     // Extend cache to hold everything we need
     cache.reserve(range-cache.len());
 
     // We also need to create a Vec that stores each transposition output.
-    let mut transpositions = vec!['\u{0}'; data.len()+range];
+    let mut transpositions = vec![0u32; data.len()+range];
 
     for i in (cache.len()+1)..range{
         let chunk_size = data.len().div_ceil(i);
@@ -94,7 +109,7 @@ pub fn analyze(canvas: HtmlCanvasElement, input: &str, range: usize, fmt: &str, 
             */
             // Here, the last two rows are incomplete and so their last character is "uninitialized".
             let fixed = &x[..chunk_size-((j >= cap) as usize)];
-            sum += ioc(fixed);
+            sum += ioc(fixed, n);
         }
         cache.push(sum / i as f32);
     }
@@ -104,6 +119,7 @@ pub fn analyze(canvas: HtmlCanvasElement, input: &str, range: usize, fmt: &str, 
 
     return Ok(cache);
 }
+
 
 /// Plot a list of IoC results given an HTML canvas.
 /// 
@@ -171,22 +187,21 @@ fn plot(canvas: HtmlCanvasElement, iocs: &[f32]) -> Result<(), JsValue>{
 
 /// Index of Coincidence calculator.
 /// 
-/// `data` - the data to perform the calculation on.
-fn ioc(data: &[char]) -> f32 {
-    /* HashMap that uses the character itself as the 'hash'.
-       There is some concern about this here: https://www.reddit.com/r/rust/comments/ps6fzn/hasher_for_char_keys/
-       but while I haven't done rigorous testing it seems WAY faster than [0usize; 256], my previous solution.
-       This is because memset/memcpy seem fairly expensive in WebAssembly. */
-    let mut counts: IntMap<u32,usize> = IntMap::default();
+/// `data` - the data to perform the calculation on. must go through an alphabetic transcription,
+/// see `transcribe()`.
+/// 
+/// `n` - the number of unique characters in the data.
+fn ioc(data: &[u32], n: usize) -> f32 {
+    let mut counts = vec![0usize; n];
     let l = data.len() as f32;
 
     // Count frequencies of each character.
     for x in data {
-        counts.entry(*x as u32).and_modify(|x| *x += 1).or_insert(1);
+        counts[*x as usize] += 1;
     }
 
     // Perform the actual IoC calculation. https://en.wikipedia.org/wiki/Index_of_coincidence
-    return counts.into_values().map(|x| x*(x-1)).sum::<usize>() as f32 / (l*(l-1.0))
+    return counts.into_iter().filter(|&x| x!=0).map(|x| x*(x-1)).sum::<usize>() as f32 / (l*(l-1.0));
 }
 
 
