@@ -81,37 +81,44 @@ pub fn analyze(canvas: HtmlCanvasElement, data: Vec<u32>, range: usize, mut cach
 
     utils::set_panic_hook();
 
-    let n: usize = *data.iter().max().unwrap() as usize + 1;
-
     // Extend cache to hold everything we need
     cache.reserve(range-cache.len());
 
-    // We also need to create a Vec that stores each transposition output.
-    let mut transpositions = vec![0u32; data.len()+range];
+    // This will hold frequency counts.
+    let n: usize = *data.iter().max().unwrap() as usize + 1;
+    let mut counts = vec![0usize; n];
 
+    // For each period value we need to calculate...
     for i in (cache.len()+1)..range{
-        let chunk_size = data.len().div_ceil(i);
-        let t_len = chunk_size*i; // how much of the transpositions array we use
-        transpose(&data,&mut transpositions,i);
-
+        let chunk_size = data.len().div_ceil(i); // We're transposing the data into I columns, this is the amount of rows.
         let cap = if (data.len() % i) != 0 {data.len() % i} else {i}; // # of complete chunks
-
-        let mut sum: f32 = 0.0;
-        for (j, x) in transpositions[..t_len].chunks_exact(chunk_size).enumerate() {
-            // Every chunk past the 'cap'th needs to have its last character stripped off
-            // as it is an 'incomplete' row. For instance, transposing 'xyzxyzxyzx' with n=3 gets:
-            /*
-            xxxx
-            yyy\0
-            zzz\0
-
-            where \0 means 'null byte'.
-            */
-            // Here, the last two rows are incomplete and so their last character is "uninitialized".
-            let fixed = &x[..chunk_size-((j >= cap) as usize)];
-            sum += ioc(fixed, n);
+        let mut total: f32 = 0.0;
+        // For every column that range value is going to create..
+        for j in 0..i {
+            let amt= chunk_size - ((j >= cap) as usize);
+            // For the amount of items that are going to be in that row...
+            for k in 0..amt{
+                // Add the character to the 'counts' array.
+                counts[data[j + k*i] as usize] += 1;    
+            }
+            // Now we've counted all the characters for this column.
+            // We'll now calculate the IOC with this data.
+            let mut sum: usize = 0;
+            let amt = amt as f32;
+            for i in 0..counts.len(){
+                let h = counts[i];
+                if h != 0 {
+                    // If counts[i] is non-zero, clear it out (for the next iteration)
+                    // and then add its frequency to sum.
+                    counts[i] = 0;
+                    sum += h*(h-1);
+                }
+            }
+            total += (sum as f32) / ((amt*(amt-1.0)))
         }
-        cache.push(sum / i as f32);
+        // Add the computed IOC score to the cache.
+        cache.push(total / i as f32);
+
     }
 
     // Plot it!
@@ -185,36 +192,3 @@ fn plot(canvas: HtmlCanvasElement, iocs: &[f32]) -> Result<(), JsValue>{
     return Ok(());
 }
 
-/// Index of Coincidence calculator.
-/// 
-/// `data` - the data to perform the calculation on. must go through an alphabetic transcription,
-/// see `transcribe()`.
-/// 
-/// `n` - the number of unique characters in the data.
-fn ioc(data: &[u32], n: usize) -> f32 {
-    let mut counts = vec![0usize; n];
-    let l = data.len() as f32;
-
-    // Count frequencies of each character.
-    for x in data {
-        counts[*x as usize] += 1;
-    }
-
-    // Perform the actual IoC calculation. https://en.wikipedia.org/wiki/Index_of_coincidence
-    return counts.into_iter().filter(|&x| x!=0).map(|x| x*(x-1)).sum::<usize>() as f32 / (l*(l-1.0));
-}
-
-
-/// Transpose data into `n` rows. 
-/// 
-/// `data` - the data to be transposed.
-/// 
-/// `output` - the output buffer for transposition. Needs to be `n` bytes larger than `data`'s length to account for incomplete rows.
-/// 
-/// `n` - the number of rows the data should be transposed into.
-fn transpose<T: Copy>(data: &[T], output: &mut[T], n: usize) {
-    let chunk_size = data.len().div_ceil(n);
-    for (i, d) in data.iter().enumerate() {
-        output[((i%n)*(chunk_size))+(i/n)] = *d;
-    }
-}

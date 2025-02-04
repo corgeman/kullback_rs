@@ -53,12 +53,7 @@
             let encoding = document.querySelector('input[name="encoding"]:checked').value;
             let range = Number(document.getElementById("range").value);
             try { // analyze returns a Result
-              let t0 = performance.now();
-              let cl = cache.length;
-              console.log(data);
               cache = analyze(canvas,data,range,cache);
-              let t1 = performance.now();
-              console.log(`took ${t1 - t0} milliseconds to analyze ${input.length} chars w/ ${range-cl} transpositions`)
               errorbox.textContent = '';
             } catch (e) { // Err variant
               errorbox.textContent = `ERROR: ${e}`;
@@ -70,6 +65,7 @@
             r[i].addEventListener("change", () => {
                 cache = [];
                 let encoding = document.querySelector('input[name="encoding"]:checked').value;
+                data = transcribe(input.value,encoding);
                 range.max = Math.floor(input.value.length/divmap[encoding])-1;
                 range.value = Math.min(500,Math.floor(range.max/2));
                 });
